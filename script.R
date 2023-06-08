@@ -309,18 +309,18 @@ vida %>%
 
 
 
-asd %>% 
-  filter(continente == "Americas",
-         tipo == "within") -> temp
+# distribución esperanza de vida
+vida %>% 
+  filter(Year == 2020) %>% 
+  ggplot() +
+  aes(LE, y = ..count../sum(..count..)) +
+  geom_histogram() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x="Esperanza de vida",
+       y="",
+       title = "Distribución de la esperanza de vida global al 2020")
 
-asd %>% 
-  filter(continente == "Europe",
-         tipo == "within") -> temp
 
-
-asd %>% 
-  filter(continente == "Asia",
-         tipo == "within") -> temp
 
 
 
@@ -435,4 +435,16 @@ pib %>%
          year == 1958) -> temp
 
 
+asd %>% 
+  filter(continente == "Americas",
+         tipo == "within") -> temp
+
+asd %>% 
+  filter(continente == "Europe",
+         tipo == "within") -> temp
+
+
+asd %>% 
+  filter(continente == "Asia",
+         tipo == "within") -> temp
 
