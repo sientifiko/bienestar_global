@@ -1,1 +1,0 @@
-# bienestar_global

@@ -18,7 +18,7 @@ pib <- readxl::read_excel("data/mpd2020.xlsx", sheet = 3) %>%
 
 for (pais in unique(pib$countrycode)) {
   pib$gdppc_hat[pib$countrycode == pais] <- na_kalman(pib$gdppc[pib$countrycode==pais],
-                                                    model = "StructTS")
+                                                      model = "StructTS")
 }
 
 for (pais in unique(pib$countrycode)) {
@@ -27,15 +27,15 @@ for (pais in unique(pib$countrycode)) {
 
 
 pib$continente <- countrycode(pib$countrycode,
-                          origin = "iso3c",
-                          destination = "continent")
+                              origin = "iso3c",
+                              destination = "continent")
 # pib <- pib %>%
 #   filter(!is.na(continente))
 
 
 pib$continente2 <- countrycode(pib$countrycode,
-                              origin = "iso3c",
-                              destination = "region")
+                               origin = "iso3c",
+                               destination = "region")
 
 pib$continente3 <- countrycode(pib$countrycode,
                                origin = "iso3c",
@@ -227,7 +227,7 @@ pib %>%
   mutate(within = cont_var/(cont_var+world_var)) %>% 
   mutate(between = 1-within) %>% 
   gather("tipo", "varianza", 5:6) -> asd 
-  ggplot() +
+ggplot() +
   aes(year, varianza, fill = tipo) %>% 
   geom_col() +
   facet_wrap(.~continente)+
@@ -327,40 +327,657 @@ vida %>%
 
 # ============== POBREZA
 
-pov <- read.csv("data/pobreza.csv")
+library(mFilter)
+
+temp <- vida %>% 
+  select(Entity, Code) %>% 
+  unique()
+
+pov <- read.csv("data/pobreza.csv") %>% 
+  filter(ppp_version == 2017,
+         welfare_type != "",
+         reporting_level == "national")
+
+pov <- pov %>% 
+  left_join(temp, by = c("country"="Entity"))
+
+pov$continente <- countrycode(pov$Code,
+                             origin = "iso3c",
+                             destination = "continent")
 
 
-colnames(pov)
+povertys <- pov %>% 
+  select(1, 2, 109, 110, 4, 7:10)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ================== LA DESIGUALDAD
-pib %>% 
+(povertys %>% 
+  filter(welfare_type == "income") %>% 
   group_by(year, continente) %>% 
-  summarise(p10 = quantile(gdppc, .1, na.rm = T),
-            p90 = quantile(gdppc, .9, na.rm = T)) %>% 
-  mutate(ratio = p90/p10) %>% 
+  summarise(median = median(headcount_ratio_international_povline),
+            p25 = quantile(headcount_ratio_international_povline, .25),
+            p75 = quantile(headcount_ratio_international_povline, .75)) %>% 
   ggplot() +
-  aes(year, y = ratio) +
-  geom_point(aes(color = continente), size = .5) +
+  aes(year) +
+  geom_point(aes(y = median, color = continente), size = .5) +
+  geom_ribbon(aes(ymax = p75, ymin = p25, fill = continente), alpha = .3) +
   facet_wrap(.~continente) +
-  guides(fill = "none", color = "none") 
+  guides(fill = "none", color = "none") +
+  theme(strip.text.x = element_text(size = 15)) +
+  labs(x="",
+       y="",
+       title = "A) Serie ingresos")
+) +
+(povertys %>% 
+  filter(welfare_type == "consumption",
+         !is.na(continente)) %>% 
+  group_by(year, continente) %>% 
+  summarise(median = median(headcount_ratio_international_povline),
+            p25 = quantile(headcount_ratio_international_povline, .25),
+            p75 = quantile(headcount_ratio_international_povline, .75)) %>% 
+  ggplot() +
+  aes(year) +
+  geom_point(aes(y = median, color = continente), size = .5) +
+  geom_ribbon(aes(ymax = p75, ymin = p25, fill = continente), alpha = .3) +
+  facet_wrap(.~continente) +
+  guides(fill = "none", color = "none") +
+  theme(strip.text.x = element_text(size = 15)) +
+  labs(x="",
+       y="",
+       title = "B) Serie consumo")) +
+  plot_annotation(title = "Pobreza absoluta",
+                  subtitle = "Porcentaje de gente que vive con menos de $2.15 USD al día",
+                  theme = theme(plot.title = element_text(size = 20),
+                                plot.subtitle = element_text(size = 15))) 
+
+povertys %>% 
+  select(2:5, 7) %>% 
+  spread(welfare_type, headcount_ratio_international_povline) %>% 
+  filter(!is.na(continente)) %>% 
+  ggplot() +
+  aes(income, consumption) +
+  geom_jitter() +
+  # facet_wrap(.~continente) +
+  guides(fill = "none", color = "none") +
+  theme(strip.text.x = element_text(size = 15)) +
+  scale_x_continuous(breaks = seq(0, 100, 5)) +
+  scale_y_continuous(breaks = seq(0, 100, 5)) +
+  labs(x="Pobreza absoluta ingreso",
+       y="Pobreza absoluta consumo",
+       title = "Relación entre pobreza por consumo e ingreso",
+       subtitle = "Cada punto es un país y año. Representa % de personas bajo umbral de $2.15 USD al día")
+
+
+
+lapply(unique(povertys$Code), function(x){
+  
+  temp <- povertys %>% 
+    filter(Code == x) %>% 
+    group_by(welfare_type) %>% 
+    summarise(n = n()) %>%  
+    filter(n == max(n)) %>% 
+    pull(welfare_type)
+  
+  data.frame(pais = x, tipo = temp)
+  
+}) %>% 
+  do.call("rbind", .) %>% 
+  as.data.frame() -> mainsrvy
+
+mainsrvy <- mainsrvy %>% 
+  filter(!(pais == "SYC" & tipo == "consumption"))
+
+
+povertys <- povertys %>% 
+  left_join(mainsrvy, by = c("Code" = "pais"))
+
+povertys <- povertys %>% 
+  filter(welfare_type == tipo)
+
+lapply(unique(povertys$Code), function(i){
+  
+  temp <- povertys %>% 
+    select(Code, year, 
+           headcount_ratio_international_povline,
+           headcount_ratio_lower_mid_income_povline,
+           headcount_ratio_upper_mid_income_povline) %>% 
+    filter(Code == i)
+  
+  temp$pov1_hat <- tryCatch({
+    
+    hpfilter(temp$headcount_ratio_international_povline,
+             type = "lambda", 
+             freq = 100)$trend
+    
+  }, error = function(x){
+    return(NA)
+  } )
+  
+  temp$pov2_hat <- tryCatch({
+    
+    hpfilter(temp$headcount_ratio_lower_mid_income_povline,
+             type = "lambda", 
+             freq = 100)$trend
+    
+  }, error = function(x){
+    return(NA)
+  } )
+  
+  temp$pov3_hat <- tryCatch({
+    
+    hpfilter(temp$headcount_ratio_upper_mid_income_povline,
+             type = "lambda", 
+             freq = 100)$trend
+    
+  }, error = function(x){
+    return(NA)
+  } )
+  
+  
+  temp <- temp %>%
+    select(1, 2, 6:8)
+  
+  temp
+}) %>% 
+  do.call("rbind", .) %>% 
+  as.data.frame() -> hd_hats
+
+colnames(hd_hats)[3:5] <- c("pov1", "pov2", "pov3")
+
+povertys2 <- povertys %>% 
+  left_join(hd_hats, 
+            by = c("Code", "year"))
+
+
+povertys2 %>% 
+  group_by(continente, welfare_type) %>% 
+  count() %>% 
+  spread(welfare_type, n)
+
+povertys2$headcount_ratio_international_povline
+
+
+
+((povertys2 %>%
+  filter(continente %in% c("Africa", "Asia", "Oceania"),
+         welfare_type == "consumption") %>%
+  group_by(year, continente) %>%
+  summarise(median = median(headcount_ratio_international_povline, na.rm = T),
+            p25 = quantile(headcount_ratio_international_povline, .25, na.rm = T),
+            p75 = quantile(headcount_ratio_international_povline, .75, na.rm = T)) %>%
+  ggplot() +
+  aes(year) +
+  geom_point(aes(y = median, color = continente), size = .5) +
+  geom_ribbon(aes(ymax = p75, ymin = p25, fill = continente), alpha = .3) +
+  facet_wrap(.~continente) +
+  guides(fill = "none", color = "none") +
+  theme(strip.text.x = element_text(size = 15)) +
+  labs(x="",
+       y="",
+       title = "A) Línea de $2.15 USD al día"))/
+  (
+    povertys2 %>%
+      filter(continente %in% c("Americas", "Europe"),
+             welfare_type == "income") %>%
+      group_by(year, continente) %>%
+      summarise(median = median(headcount_ratio_international_povline, na.rm = T),
+                p25 = quantile(headcount_ratio_international_povline, .25, na.rm = T),
+                p75 = quantile(headcount_ratio_international_povline, .75, na.rm = T)) %>%
+      ggplot() +
+      aes(year) +
+      geom_point(aes(y = median, color = continente), size = .5) +
+      geom_ribbon(aes(ymax = p75, ymin = p25, fill = continente), alpha = .3) +
+      facet_wrap(.~continente) +
+      guides(fill = "none", color = "none") +
+      theme(strip.text.x = element_text(size = 15)) +
+      labs(x="",
+           y="")
+  )) -> g1
+
+
+((povertys2 %>%
+    filter(continente %in% c("Africa", "Asia", "Oceania"),
+           welfare_type == "consumption") %>%
+    group_by(year, continente) %>%
+    summarise(median = median(headcount_ratio_lower_mid_income_povline, na.rm = T),
+              p25 = quantile(headcount_ratio_lower_mid_income_povline, .25, na.rm = T),
+              p75 = quantile(headcount_ratio_lower_mid_income_povline, .75, na.rm = T)) %>%
+    ggplot() +
+    aes(year) +
+    geom_point(aes(y = median, color = continente), size = .5) +
+    geom_ribbon(aes(ymax = p75, ymin = p25, fill = continente), alpha = .3) +
+    facet_wrap(.~continente) +
+    guides(fill = "none", color = "none") +
+    theme(strip.text.x = element_text(size = 15)) +
+    labs(x="",
+         y="",
+         title = "B) Línea de $3.65 USD al día"))/
+  (
+    povertys2 %>%
+      filter(continente %in% c("Americas", "Europe"),
+             welfare_type == "income") %>%
+      group_by(year, continente) %>%
+      summarise(median = median(headcount_ratio_lower_mid_income_povline, na.rm = T),
+                p25 = quantile(headcount_ratio_lower_mid_income_povline, .25, na.rm = T),
+                p75 = quantile(headcount_ratio_lower_mid_income_povline, .75, na.rm = T)) %>%
+      ggplot() +
+      aes(year) +
+      geom_point(aes(y = median, color = continente), size = .5) +
+      geom_ribbon(aes(ymax = p75, ymin = p25, fill = continente), alpha = .3) +
+      facet_wrap(.~continente) +
+      guides(fill = "none", color = "none") +
+      theme(strip.text.x = element_text(size = 15)) +
+      labs(x="",
+           y="")
+  ) )-> g2
+
+
+((povertys2 %>%
+    filter(continente %in% c("Africa", "Asia", "Oceania"),
+           welfare_type == "consumption") %>%
+    group_by(year, continente) %>%
+    summarise(median = median(headcount_ratio_upper_mid_income_povline, na.rm = T),
+              p25 = quantile(headcount_ratio_upper_mid_income_povline, .25, na.rm = T),
+              p75 = quantile(headcount_ratio_upper_mid_income_povline, .75, na.rm = T)) %>%
+    ggplot() +
+    aes(year) +
+    geom_point(aes(y = median, color = continente), size = .5) +
+    geom_ribbon(aes(ymax = p75, ymin = p25, fill = continente), alpha = .3) +
+    facet_wrap(.~continente) +
+    guides(fill = "none", color = "none") +
+    theme(strip.text.x = element_text(size = 15)) +
+    labs(x="",
+         y="",
+         title = "C) Línea de $6.85 USD al día"))/
+  (
+    povertys2 %>%
+      filter(continente %in% c("Americas", "Europe"),
+             welfare_type == "income") %>%
+      group_by(year, continente) %>%
+      summarise(median = median(headcount_ratio_upper_mid_income_povline, na.rm = T),
+                p25 = quantile(headcount_ratio_upper_mid_income_povline, .25, na.rm = T),
+                p75 = quantile(headcount_ratio_upper_mid_income_povline, .75, na.rm = T)) %>%
+      ggplot() +
+      aes(year) +
+      geom_point(aes(y = median, color = continente), size = .5) +
+      geom_ribbon(aes(ymax = p75, ymin = p25, fill = continente), alpha = .3) +
+      facet_wrap(.~continente) +
+      guides(fill = "none", color = "none") +
+      theme(strip.text.x = element_text(size = 15)) +
+      labs(x="",
+           y="")
+  ) )-> g3
+
+
+((g1 + g2)/g3) +
+  plot_layout(ncol = 2,
+              heights = unit(c(5, 9), c("cm", "cm"))) +
+  plot_annotation(title = "Tendencia global de la pobreza a distintos umbrales",
+                  # caption = "Fuente: PIP\n@sientifiko1",
+                  theme = theme(plot.title = element_text(size = 20)))
+
+
+
+
+povertys2 %>%
+  filter(continente %in% c("Americas"),
+         welfare_type == "income") %>%
+  group_by(year, continente) %>%
+  summarise(median = median(headcount_ratio_international_povline, na.rm = T),
+            p25 = quantile(headcount_ratio_international_povline, .25, na.rm = T),
+            p75 = quantile(headcount_ratio_international_povline, .75, na.rm = T)) -> low
+
+
+povertys2 %>%
+  filter(continente %in% c("Americas"),
+         welfare_type == "income") %>%
+  group_by(year, continente) %>%
+  summarise(median = median(headcount_ratio_lower_mid_income_povline, na.rm = T),
+            p25 = quantile(headcount_ratio_lower_mid_income_povline, .25, na.rm = T),
+            p75 = quantile(headcount_ratio_lower_mid_income_povline, .75, na.rm = T)) -> mid
+
+
+povertys2 %>%
+  filter(continente %in% c("Americas"),
+         welfare_type == "income") %>%
+  group_by(year, continente) %>%
+  summarise(median = median(headcount_ratio_upper_mid_income_povline, na.rm = T),
+            p25 = quantile(headcount_ratio_upper_mid_income_povline, .25, na.rm = T),
+            p75 = quantile(headcount_ratio_upper_mid_income_povline, .75, na.rm = T)) -> hi
+
+
+
+povertys2 %>%
+  filter(continente %in% c("Africa"),
+         welfare_type == "consumption",
+         pov1!= "") %>%
+  group_by(Code) %>% 
+  mutate(var = last(pov1) - first(pov1)) %>% 
+  ggplot() +
+  aes(year, pov1, color = ifelse(var > 0, "asd", "asdasd")) +
+  guides(color = "none") +
+  scale_color_manual(values = c("darkred", "green")) +
+  geom_line(size = .9) +
+  facet_wrap(.~reorder(Code, var)) +
+  scale_x_continuous(breaks = seq(1980, 2020, 20)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = .5, vjust = .5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +
+  labs(title = "A) Tendencia en pobreza abosluta") -> g1
+
+povertys2 %>%
+  filter(continente %in% c("Africa"),
+         welfare_type == "consumption",
+         pov2!= "") %>%
+  group_by(Code) %>% 
+  mutate(var = last(pov2) - first(pov2)) %>% 
+  ggplot() +
+  aes(year, pov2, color = ifelse(var > 0, "asd", "asdasd")) +
+  guides(color = "none") +
+  scale_color_manual(values = c("darkred", "green")) +
+  geom_line(size = .9) +
+  facet_wrap(.~reorder(Code, var)) +
+  scale_x_continuous(breaks = seq(1980, 2020, 20)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = .5, vjust = .5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +
+  labs(title = "B) Tendencia umbral $3.65") -> g2
+
+povertys2 %>%
+  filter(continente %in% c("Africa"),
+         welfare_type == "consumption",
+         pov3!= "") %>%
+  group_by(Code) %>% 
+  mutate(var = last(pov3) - first(pov3)) %>% 
+  ggplot() +
+  aes(year, pov3, color = ifelse(var > 0, "asd", "asdasd")) +
+  guides(color = "none") +
+  scale_color_manual(values = c("darkred", "green")) +
+  geom_line(size = .9) +
+  facet_wrap(.~reorder(Code, var)) +
+  scale_x_continuous(breaks = seq(1980, 2020, 20)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = .5, vjust = .5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +
+  labs(title = "C) Tendencia umbral $6.85") -> g3
+
+(g1 + g2 + g3) +
+  plot_annotation(title = "Tendencias en pobreza en África",
+                  subtitle = "Rectas representan tendencia estimada por filtro Hodrick–Prescott parámetro suavización 100")
+
+
+
+povertys2 %>% 
+  filter(continente %in% c("Africa"),
+         welfare_type == "consumption") %>% 
+  ggplot() +
+  aes(year, headcount_ratio_international_povline, color = Code) +
+  geom_line()
+
+unique(povertys2$pov1)
+
+povertys2 %>%
+  filter(continente %in% c("Americas"),
+         welfare_type == "income",
+         pov1 != "") %>% 
+  group_by(Code) %>% 
+  mutate(var = last(pov1) - first(pov1)) %>% 
+  ggplot() +
+  aes(year, pov1, color = ifelse(var > 0, "asd", "asdasd")) +
+  guides(color = "none") +
+  scale_color_manual(values = c("darkred", "green")) +
+  geom_line(size = .9) +
+  facet_wrap(.~reorder(Code, var)) +
+  scale_x_continuous(breaks = seq(1980, 2020, 20)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = .5, vjust = .5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +
+  labs(title = "A) Tendencia en pobreza abosluta") -> g1
+
+povertys2 %>%
+  filter(continente %in% c("Americas"),
+         welfare_type == "income",
+         pov2!= "") %>%
+  group_by(Code) %>% 
+  mutate(var = last(pov2) - first(pov2)) %>% 
+  ggplot() +
+  aes(year, pov2, color = ifelse(var > 0, "asd", "asdasd")) +
+  guides(color = "none") +
+  scale_color_manual(values = c("darkred", "green")) +
+  geom_line(size = .9) +
+  facet_wrap(.~reorder(Code, var)) +
+  scale_x_continuous(breaks = seq(1980, 2020, 20)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = .5, vjust = .5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +
+  labs(title = "B) Tendencia umbral $3.65") -> g2
+
+povertys2 %>%
+  filter(continente %in% c("Americas"),
+         welfare_type == "income",
+         pov3!= "") %>%
+  group_by(Code) %>% 
+  mutate(var = last(pov3) - first(pov3)) %>% 
+  ggplot() +
+  aes(year, pov3, color = ifelse(var > 0, "asd", "asdasd")) +
+  guides(color = "none") +
+  scale_color_manual(values = c("darkred", "green")) +
+  geom_line(size = .9) +
+  facet_wrap(.~reorder(Code, var)) +
+  scale_x_continuous(breaks = seq(1980, 2020, 20)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = .5, vjust = .5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +
+  labs(title = "C) Tendencia umbral $6.85") -> g3  
+
+  
+  
+(g1 + g2 + g3) +
+  plot_annotation(title = "Tendencias en pobreza en América",
+                  subtitle = "Rectas representan tendencia estimada por filtro Hodrick–Prescott parámetro suavización 100")
+
+
+
+t1980 <- povertys2 %>% 
+  filter(year >= 1980 & year <= 1989) %>% 
+  select(country, 7:9) %>% 
+  group_by(country) %>% 
+  summarise(avgabs = mean(headcount_ratio_international_povline, na.rm = T),
+            avgmid = mean(headcount_ratio_lower_mid_income_povline, na.rm = T),
+            avgup = mean(headcount_ratio_upper_mid_income_povline, na.rm = T)) %>% 
+  as.data.frame()
+
+rownames(t1980) <- t1980$country
+
+
+t2010 <- povertys2 %>% 
+  filter(year >= 2010 & year <= 2019 ,
+         country %in% unique(t1980$country)) %>% 
+  select(country, 7:9) %>% 
+  group_by(country) %>% 
+  summarise(avgabs = mean(headcount_ratio_international_povline, na.rm = T),
+            avgmid = mean(headcount_ratio_lower_mid_income_povline, na.rm = T),
+            avgup = mean(headcount_ratio_upper_mid_income_povline, na.rm = T)) %>% 
+  as.data.frame()
+
+rownames(t2010)<- t2010$country
+
+
+t1980$country <- NULL
+t2010$country <- NULL
+
+library(factoextra)
+ 
+clust80 <- eclust(scale(t1980), "hclust", k = 5)
+clust10 <- eclust(scale(t2010), "hclust", k = 5)
+
+fviz_dend(clust80, rect = T, cex = .6, lwd = .5, horiz = T) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  labs(title = "Cluster pobreza 1980-1989") -> g1 
+
+fviz_dend(clust10, rect = T, cex = .6, lwd = .5, horiz = T) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  labs(title = "Cluster pobreza 2010-2019") -> g2
+
+
+# =========== POBREZA 2
+
+pov2 <- readxl::read_excel("data/poverty CBN.xlsx", skip = 2, sheet = 1) %>% 
+  gather("iso", "pobreza", 2:26)
+
+
+pov2$continente <- countrycode(pov2$iso,
+                               origin = "iso3c",
+                               destination = "continent")
+
+pov2$Year
+
+pov2 %>% 
+  group_by(Year, continente) %>%
+  summarise(median = median(pobreza, na.rm = T),
+            p25 = quantile(pobreza, .25, na.rm = T),
+            p75 = quantile(pobreza, .75, na.rm = T)) %>%
+  ggplot() +
+  aes(Year) +
+  geom_point(aes(y = median, color = continente), size = .5) +
+  geom_ribbon(aes(ymax = p75, ymin = p25, fill = continente), alpha = .3) +
+  facet_wrap(.~continente) +
+  guides(fill = "none", color = "none") +
+  theme(strip.text.x = element_text(size = 15),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(), 
+        plot.title = element_text(size = 20),
+        plot.subtitle = element_text(size = 15)) +
+  labs(title = "Pobreza en el muy largo plazo",
+       subtitle = "Porcentaje de la población asalariada que no alcanza a comprar una canasta básica")
+
+
+
+# ======= POBREZA RURAL
+
+pov <- read.csv("data/pobreza.csv") %>% 
+  filter(ppp_version == 2017,
+         welfare_type != "",
+         reporting_level == "rural")
+
+pov <- pov %>% 
+  left_join(temp, by = c("country"="Entity"))
+
+pov$continente <- countrycode(pov$Code,
+                              origin = "iso3c",
+                              destination = "continent")
+
+
+povertys <- pov %>% 
+  select(1, 2, 109, 110, 4, 7:10)
+
+
+lapply(unique(povertys$Code), function(x){
+  
+  temp <- povertys %>% 
+    filter(Code == x) %>% 
+    group_by(welfare_type) %>% 
+    summarise(n = n()) %>%  
+    filter(n == max(n)) %>% 
+    pull(welfare_type)
+  
+  data.frame(pais = x, tipo = temp)
+  
+}) %>% 
+  do.call("rbind", .) %>% 
+  as.data.frame() -> mainsrvy
+
+mainsrvy <- mainsrvy %>% 
+  filter(!(pais == "SYC" & tipo == "consumption"))
+
+
+povertys <- povertys %>% 
+  left_join(mainsrvy, by = c("Code" = "pais"))
+
+povertys <- povertys %>% 
+  filter(welfare_type == tipo)
+
+lapply(unique(povertys$Code), function(i){
+  
+  temp <- povertys %>% 
+    select(Code, year, 
+           headcount_ratio_international_povline,
+           headcount_ratio_lower_mid_income_povline,
+           headcount_ratio_upper_mid_income_povline) %>% 
+    filter(Code == i)
+  
+  temp$pov1_hat <- tryCatch({
+    
+    hpfilter(temp$headcount_ratio_international_povline,
+             type = "lambda", 
+             freq = 100)$trend
+    
+  }, error = function(x){
+    return(NA)
+  } )
+  
+  temp$pov2_hat <- tryCatch({
+    
+    hpfilter(temp$headcount_ratio_lower_mid_income_povline,
+             type = "lambda", 
+             freq = 100)$trend
+    
+  }, error = function(x){
+    return(NA)
+  } )
+  
+  temp$pov3_hat <- tryCatch({
+    
+    hpfilter(temp$headcount_ratio_upper_mid_income_povline,
+             type = "lambda", 
+             freq = 100)$trend
+    
+  }, error = function(x){
+    return(NA)
+  } )
+  
+  
+  temp <- temp %>%
+    select(1, 2, 6:8)
+  
+  temp
+}) %>% 
+  do.call("rbind", .) %>% 
+  as.data.frame() -> hd_hats
+
+colnames(hd_hats)[3:5] <- c("pov1", "pov2", "pov3")
+
+povertys2 <- povertys %>% 
+  left_join(hd_hats, 
+            by = c("Code", "year"))
+
+
+povertys2 %>% 
+  group_by(continente, welfare_type) %>% 
+  count() %>% 
+  spread(welfare_type, n)
+
+
+povertys2 %>% 
+  gather("tipo", "pov",11:13) %>% 
+  filter(!is.na(pov)) %>% 
+  ggplot() +
+  aes(year, pov, color = tipo) +
+  # guides(color = "none") +
+  geom_line(size = 1) +
+  facet_wrap(.~Code) +
+  scale_color_manual(values = c("darkred", "darkgoldenrod" ,"darkgreen"),
+                     labels = c("Absoluta", "$3.65 al día", "$6.85 al día")) +
+  scale_x_continuous(breaks = seq(1980, 2020, 20)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = .5, vjust = .5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +
+  labs(title = "Pobreza en zonas rurales",
+       subtitle = "Rectas representan tendencia estimada por filtro Hodrick–Prescott parámetro suavización 100",
+       color = "Umbral pobreza")
 
 
 
@@ -368,14 +985,7 @@ pib %>%
 
 
 
-
-
-
-
-
-
-
-
+  
 ## ====================================
 #               EXTRAS
 
@@ -448,3 +1058,45 @@ asd %>%
   filter(continente == "Asia",
          tipo == "within") -> temp
 
+
+t1980$clust <- clust80$cluster
+
+
+g1 + g2
+
+povertys2 %>% 
+  filter(country %in% c("Nigeria", "Lesotho",
+                        "Botswana", "Ghana")) %>% 
+  ggplot() +
+  aes(year, headcount_ratio_international_povline, color = country) +
+  guides(color = "none") +
+  geom_line() -> g1
+
+
+povertys2 %>% 
+  filter(country %in% c("Nigeria", "Lesotho",
+                        "Botswana", "Ghana")) %>% 
+  ggplot() +
+  aes(year, headcount_ratio_lower_mid_income_povline, color = country) +
+  guides(color = "none") +
+  geom_line() -> g2
+
+
+povertys2 %>% 
+  filter(country %in% c("Nigeria", "Lesotho",
+                        "Botswana", "Ghana")) %>% 
+  ggplot() +
+  aes(year, headcount_ratio_upper_mid_income_povline, color = country) +
+  # guides(color = "none") +
+  geom_line() -> g3
+
+
+g1 + g2 + g3
+
+t2010$clust <- clust10$cluster
+
+asd <- t2010 %>% 
+  filter(clust == 1)
+
+asd2 <- t2010 %>% 
+  filter(clust == 2)
